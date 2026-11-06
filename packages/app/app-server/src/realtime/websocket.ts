@@ -40,11 +40,29 @@ export function createRealtimeWebSocketHandler(
     // Browsers always send Origin on WebSocket handshakes and must be
     // same-origin. Origin-less handshakes remain available to non-browser
     // clients, which must provide credentials explicitly.
-    if (origin && origin !== url.origin) {
-      return Response.json(
-        { error: 'WebSocket origin is not allowed.' },
-        { status: 403 },
-      );
+    if (origin) {
+      const normalizeOrigin = (val: string): string =>
+        val.replace(/^ws:\/\//i, 'http://').replace(/^wss:\/\//i, 'https://');
+      if (normalizeOrigin(origin) !== normalizeOrigin(url.origin)) {
+        try {
+          const originHost = new URL(origin).host;
+          const expectedHost =
+            request.headers.get('x-forwarded-host') ||
+            request.headers.get('host') ||
+            url.host;
+          if (originHost !== expectedHost && originHost !== url.host) {
+            return Response.json(
+              { error: 'WebSocket origin is not allowed.' },
+              { status: 403 },
+            );
+          }
+        } catch {
+          return Response.json(
+            { error: 'WebSocket origin is not allowed.' },
+            { status: 403 },
+          );
+        }
+      }
     }
 
     const realtime = container.resolve(realtimeServiceToken);

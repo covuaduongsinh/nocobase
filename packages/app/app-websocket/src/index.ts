@@ -292,12 +292,22 @@ function createRequestHeaders(req: IncomingMessage): Headers {
 }
 
 function createRequestUrl(req: IncomingMessage): URL {
-  const host = firstHeaderValue(req.headers.host) ?? 'localhost';
+  const forwardedHost = firstHeaderValue(req.headers['x-forwarded-host']);
+  const host =
+    forwardedHost?.split(',')[0]?.trim() ||
+    firstHeaderValue(req.headers.host) ||
+    'localhost';
   const forwarded = firstHeaderValue(req.headers['x-forwarded-proto']);
   const encrypted = (req.socket as typeof req.socket & { encrypted?: boolean })
     .encrypted;
-  const protocol =
+  const rawProtocol =
     forwarded?.split(',')[0]?.trim() || (encrypted ? 'https' : 'http');
+  const protocol =
+    rawProtocol === 'wss'
+      ? 'https'
+      : rawProtocol === 'ws'
+        ? 'http'
+        : rawProtocol;
   return new URL(req.url ?? '/', `${protocol}://${host}`);
 }
 

@@ -20,10 +20,11 @@ const stagingDirectory: string = path.join(packageRoot, 'dist.build');
 
 await rm(stagingDirectory, { force: true, recursive: true });
 
+const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 const result = spawnSync(
-  'pnpm',
+  pnpmCommand,
   ['exec', 'tsc', '-p', 'tsconfig.build.json', '--outDir', stagingDirectory],
-  { cwd: packageRoot, stdio: 'inherit' },
+  { cwd: packageRoot, stdio: 'inherit', shell: process.platform === 'win32' },
 );
 
 if (result.error) {
