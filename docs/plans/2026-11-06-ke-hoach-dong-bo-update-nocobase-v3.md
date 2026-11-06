@@ -84,3 +84,23 @@ git push origin v3-main
 ### Bước 6: Dọn dẹp nhánh cũ trên GitHub (nếu cần)
 
 - Xóa nhánh `main` v2 cũ trên `origin/nocobase` (do đã chuyển sang repo `nocobase-v2`), đảm bảo repo `covuaduongsinh/nocobase` thuần túy là NocoBase 3.
+
+---
+
+## 4. Kết quả Thực hiện (Execution Summary)
+
+1. **Đồng bộ nhánh `v3-develop`:**
+   - Kéo toàn bộ 60+ commits mới nhất từ `upstream/v3-develop` (HEAD: `7c25f88538`).
+   - Đã push nhánh `v3-develop` lên GitHub `covuaduongsinh/nocobase`.
+2. **Tích hợp vào nhánh `v3-main`:**
+   - Bảo toàn 100% tất cả 32 file tài liệu kế hoạch trong `docs/plans/`.
+   - Giữ mã nguồn NocoBase 3 mới nhất chuẩn upstream.
+   - Bổ sung bản vá tương thích Windows cho `dev-config/scripts/build.ts` và hỗ trợ reverse proxy headers (`x-forwarded-proto`, `x-forwarded-host`) trong `packages/app/app-server/src/realtime/websocket.ts` & `packages/app/app-websocket/src/index.ts`.
+   - Commit: `13ea789055` (`fix: support windows pnpm execution and reverse-proxy websocket headers`).
+3. **Cài đặt & Đồng bộ Workspace:**
+   - Đã chạy thành công `pnpm install --no-frozen-lockfile` cho toàn bộ 92 workspace packages.
+   - Các postinstall hook và skill sync hoạt động hoàn toàn xanh.
+4. **Đồng bộ GitHub:**
+   - Nhánh mặc định (default branch): `v3-main`.
+   - Đã đẩy `v3-main` lên `origin`.
+   - Đã xóa nhánh `main` v2 cũ trên remote `origin` (toàn bộ code v2 đã nằm độc lập tại repo `covuaduongsinh/nocobase-v2`).
