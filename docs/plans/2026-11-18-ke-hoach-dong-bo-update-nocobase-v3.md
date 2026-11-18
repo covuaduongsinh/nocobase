@@ -92,4 +92,25 @@ git push origin v3 --tags
 
 ## 4. Kết quả Thực hiện (Execution Summary)
 
-_(Sẽ cập nhật sau khi hoàn thành các bước triển khai)_
+1. **Sao lưu an toàn:**
+   - Đã tạo nhánh sao lưu dự phòng: `backup/v3-main-before-sync-20261118`.
+   - Đã commit bản vá tương thích Windows cho `packages/app/app-cli/src/tools/scripts/utils/retarget-native.mjs` và cập nhật kế hoạch Studio tại commit `b2f7056c20`.
+
+2. **Đồng bộ nhánh nguồn `v3` từ Upstream:**
+   - Nhánh `v3` đã được tạo và kéo toàn bộ 154 commits mới nhất từ `upstream/v3` (HEAD: `e90a91e860`, bản phát hành `2026-11-17.2`).
+   - Đã đẩy (push) thành công nhánh `v3` lên GitHub remote `origin` (`https://github.com/covuaduongsinh/nocobase.git`).
+
+3. **Tích hợp vào nhánh chính `v3-main`:**
+   - Merge tự động và hoàn toàn sạch sẽ nhánh `v3` vào `v3-main` tại commit `fd53c8ef7c`.
+   - Bảo toàn trọn vẹn 100% tất cả 33 tài liệu kế hoạch trong `docs/plans/`.
+   - Bảo toàn các bản vá Windows và reverse-proxy:
+     - `packages/tools/dev-config/scripts/build.ts`
+     - `packages/app/app-server/src/realtime/websocket.ts`
+     - `packages/app/app-websocket/src/index.ts`
+     - `packages/app/app-cli/src/tools/scripts/utils/retarget-native.mjs`
+
+4. **Đồng bộ GitHub:**
+   - Đã đẩy thành công nhánh `v3` lên `origin/v3`.
+   - Đã đẩy thành công nhánh `v3-main` lên `origin/v3-main`.
+   - Repo GitHub `covuaduongsinh/nocobase` đã hoàn toàn đồng bộ với mã nguồn NocoBase 3 mới nhất của upstream.
+
