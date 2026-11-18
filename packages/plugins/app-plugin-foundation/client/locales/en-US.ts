@@ -3,11 +3,15 @@ import type { LocaleResource } from '@nocobase/i18n';
 const enUS = {
   nav: {
     settings: 'System settings',
-    foundation: 'App foundation',
+    foundation: 'App usage',
     foundationDescription:
       'The NocoBase capabilities this application is built on.',
+    capabilityGuide: 'Features and extensions',
+    capabilityGuideDescription:
+      'Learn how to use the features available in this application to build your business.',
   },
   page: {
+    otherCapabilities: 'Other capabilities',
     notCounted: 'Not counted',
     updatingHistory: 'Updating… Showing the previous result.',
     previousKernel:
@@ -15,7 +19,7 @@ const enUS = {
     identified: 'Identified {{value}}',
     counted: 'Counted {{value}}',
     partial: 'Some data is pending update',
-    title: 'App foundation',
+    title: 'App usage',
     description:
       'Your application focuses on business. Data, permissions and workflows are supported by NocoBase Core: common capabilities developed, tested and maintained by NocoBase, and upgraded with official releases.',
     bandTitle: 'NocoBase Core',
@@ -126,6 +130,7 @@ const enUS = {
     legendUnused: 'Not used yet {{count}}',
   },
   detail: {
+    selectedCapability: 'Selected capability',
     retainedAt: 'Last confirmed {{time}}',
     readNotes: 'Read details',
     collectionCount: '{{count}} collections',
@@ -406,6 +411,7 @@ const enUS = {
     seeds: 'Seeds run',
   },
   dynamic: {
+    extension: 'Extension',
     pending: 'Pending recognition',
     pendingDescription:
       'This plugin is registered. Its configuration and actual use have not yet been determined.',

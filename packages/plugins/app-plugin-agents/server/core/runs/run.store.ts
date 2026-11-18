@@ -32,6 +32,7 @@ export interface RunRecord {
   readonly agentId: string;
   readonly agentType: string;
   readonly runnerId: string | null;
+  readonly runnerPinId?: string | null;
   readonly executionHistory?: JsonColumn;
   readonly tool?: string | null;
   readonly modelService?: string | null;
@@ -69,12 +70,18 @@ export interface RunRecord {
   readonly cancelledById: string | null;
   readonly failureReason: string | null;
   readonly failureDetail: string | null;
+  readonly failureParams?: JsonColumn;
   readonly summary: string | null;
   readonly sessionId: string | null;
   readonly workDir: string | null;
   readonly directoryKey: string | null;
   readonly claimFailures: number;
   readonly payloadFingerprint: string | null;
+  /**
+   * The kind of runner its actor wanted it to go to first when it was queued (`personal` or `team`; null: either),
+   * read by `claimPace`.
+   */
+  readonly runnerPreference?: string | null;
   /** While queued: the variables for shared runners only that kept a personal runner off it (`VariableRef[]`). */
   readonly teamOnlyVariables?: JsonColumn;
   /** While held: the repository URLs its runner may ask credentials for on demand (`RunGit.onDemand`); null otherwise. */
@@ -170,6 +177,23 @@ export function runsRepo(conn: DatabaseConnection): Repository<RunRecord> {
   return conn.repository<RunRecord>('agRuns');
 }
 
+/**
+ * The kind of runner `userId` wants their runs to go to first (`ChatPreferences.runnerPreference`, kept in
+ * `agChatPreferences`), as a run stores it: null for `auto`.
+ */
+export async function runnerPreferenceOf(
+  conn: DatabaseConnection,
+  userId: string,
+): Promise<'personal' | 'team' | null> {
+  const row = await conn
+    .repository<{ userId: string; runnerPreference: string | null }>(
+      'agChatPreferences',
+    )
+    .findOne({ filter: { userId } });
+  const preference = row?.runnerPreference;
+  return preference === 'personal' || preference === 'team' ? preference : null;
+}
+
 export function inputsRepo(conn: DatabaseConnection): Repository<InputRecord> {
   return conn.repository<InputRecord>('agRunInputs');
 }
@@ -237,6 +261,8 @@ export function toRun(record: RunRecord): Run {
     agentId: record.agentId,
     agentType: record.agentType === 'online' ? 'online' : 'runner',
     runnerId: record.runnerId,
+    runnerPinId: record.runnerPinId ?? null,
+    sessionId: record.sessionId,
     executions,
     runnerName: latest?.runnerName ?? null,
     runnerOwnerUserId: latest?.runnerOwnerUserId ?? null,
@@ -279,6 +305,8 @@ export function toRun(record: RunRecord): Run {
     cancelledById: record.cancelledById,
     failureReason: record.failureReason as FailureReason | null,
     failureDetail: record.failureDetail,
+    failureParams:
+      record.failureParams == null ? null : jsonObject(record.failureParams),
     summary: record.summary,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,

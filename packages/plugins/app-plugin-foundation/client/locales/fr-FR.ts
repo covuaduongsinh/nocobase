@@ -6,8 +6,12 @@ const frFR: FoundationResource = {
     foundation: 'Socle de l’application',
     foundationDescription:
       'Les capacités NocoBase sur lesquelles repose cette application.',
+    capabilityGuide: 'Fonctionnalités et extensions',
+    capabilityGuideDescription:
+      'Découvrez comment utiliser les fonctionnalités disponibles dans cette application pour vos besoins métier.',
   },
   page: {
+    otherCapabilities: 'Autres capacités',
     notCounted: 'Non compté',
     updatingHistory: 'Mise à jour… Affichage du résultat précédent.',
     previousKernel:
@@ -127,6 +131,7 @@ const frFR: FoundationResource = {
     legendUnused: 'Non utilisé {{count}}',
   },
   detail: {
+    selectedCapability: 'Capacité sélectionnée',
     retainedAt: 'Dernière confirmation {{time}}',
     readNotes: 'Détails de lecture',
     collectionCount: '{{count}} tables',
@@ -407,6 +412,7 @@ const frFR: FoundationResource = {
     seeds: 'Initialisations exécutées',
   },
   dynamic: {
+    extension: 'Extension',
     pending: 'Identification en attente',
     pendingDescription:
       'Le plugin est enregistré ; sa configuration et son utilisation réelle restent à déterminer.',

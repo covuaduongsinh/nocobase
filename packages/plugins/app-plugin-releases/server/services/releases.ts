@@ -11,7 +11,14 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 
 import type { AppRuntimeLogging } from '@nocobase/app-server/logging';
-import type { DatabaseConnection, DatabaseManager, Row } from '@nocobase/db';
+import type {
+  DatabaseConnection,
+  DatabaseManager,
+  FilterBuilder,
+  FilterNode,
+  Row,
+  SortBuilder,
+} from '@nocobase/db';
 import {
   createDriveManager,
   type AppDriveDiskConfig,
@@ -27,15 +34,20 @@ import {
   type JournalQuery,
   type Logger,
 } from '@nocobase/logging';
-import type { Knex } from 'knex';
 import { parse as parseYaml } from 'yaml';
 
 import { BUSINESS_ACTIONS, type AppAction } from '../../shared/access.js';
-import { RESERVED_VARIABLE_NAMES } from '../../shared/releases.js';
+import {
+  RESERVED_VARIABLE_NAMES,
+  runStateOf,
+  type RunState,
+} from '../../shared/releases.js';
 import type {
   ActorKind,
   AppActivation,
   AppPage,
+  AppHostView,
+  SharedHostView,
   AppSummary,
   AppView,
   ConfigDocument,
@@ -75,8 +87,10 @@ import {
   type AppObservedStatus,
   type DeploymentEvent,
   type DriverSession,
+  type HostOccupancy,
   type ImageArtifact,
   type RegistryAuth,
+  UNRESTORED_APP_ERROR,
 } from '../drivers/types.js';
 import { ReleasesError, forbidden, notFound } from '../errors.js';
 import {
@@ -276,6 +290,10 @@ export interface UploadReleaseInput {
 export interface ListAppsOptions {
   readonly search?: string;
   readonly environmentId?: string;
+  /** Apps of any of these environments (with `environmentId`, of it too). */
+  readonly environmentIds?: readonly string[];
+  /** Apps whose runtime is in any of these states (`runStateOf`), applied before the page is cut. */
+  readonly runStates?: readonly RunState[];
   readonly labels?: Labels;
   readonly page?: number;
   readonly pageSize?: number;
@@ -309,7 +327,12 @@ export function archiveFileName(appId: string, version: string): string {
 export class ReleasesService {
   private readonly dispatch = new Map<
     string,
-    { appId: string; submitted: boolean; cancelled: boolean }
+    {
+      appId: string;
+      submitted: boolean;
+      cancelled: boolean;
+      environmentId?: string;
+    }
   >();
   private readonly progress = new Map<
     string,
@@ -358,49 +381,184 @@ export class ReleasesService {
         'INVALID_SEARCH',
         'INVALID_ARGUMENT',
       );
-    const searchIds = search
-      ? await this.findAppIdsBySearch(search)
-      : undefined;
-    let query = this.query()
-      .selectFrom('relApps')
-      .selectAll()
-      .orderBy('createdAt', 'desc')
-      .orderBy('id', 'desc');
-    // An empty list matches nothing: `id IS NULL` never holds, and unlike a placeholder id it needs no value
-    // (PostgreSQL refuses a NUL character in a text parameter) and suits any column type.
-    if (searchIds)
-      query = query.where((eb) =>
-        searchIds.length > 0
-          ? eb('id', 'in', [...searchIds])
-          : eb('id', 'is', null),
-      );
-    if (options.environmentId)
-      query = query.where('environmentId', '=', options.environmentId);
-    const only = filter.only;
-    if (only)
-      query = query.where((eb) =>
-        only.length > 0 ? eb('id', 'in', [...only]) : eb('id', 'is', null),
-      );
-    if (!filter.all) {
-      const { createdBy, ids } = filter;
-      query = query.where((eb) =>
-        eb.or([
-          eb('createdBy', 'in', [...createdBy]),
-          ids.length > 0 ? eb('id', 'in', [...ids]) : eb('id', 'is', null),
-        ]),
-      );
+    const environmentIds = [
+      ...new Set([
+        ...(options.environmentId ? [options.environmentId] : []),
+        ...(options.environmentIds ?? []),
+      ]),
+    ];
+    const among = (
+      f: FilterBuilder,
+      field: string,
+      values: readonly string[],
+    ): FilterNode => {
+      // Group large scopes so SQLite does not exhaust its expression depth on a flat disjunction.
+      if (!values.length)
+        return f.and([f.string(field).eq(''), f.string(field).ne('')]);
+      const nodes = values.map((value) => f.string(field).eq(value));
+      const group = (items: readonly FilterNode[]): FilterNode =>
+        items.length <= 100
+          ? f.or(items)
+          : f.or(
+              Array.from({ length: Math.ceil(items.length / 100) }, (_, i) =>
+                group(items.slice(i * 100, (i + 1) * 100)),
+              ),
+            );
+      return group(nodes);
+    };
+    const condition = (f: FilterBuilder): FilterNode =>
+      f.and([
+        ...(environmentIds.length
+          ? [among(f, 'environmentId', environmentIds)]
+          : []),
+        ...(filter.only ? [among(f, 'id', filter.only)] : []),
+        ...(filter.all
+          ? []
+          : [
+              f.or([
+                among(f, 'createdBy', filter.createdBy),
+                among(f, 'id', filter.ids),
+              ]),
+            ]),
+        ...(search
+          ? [
+              f.or([
+                f.string('id').includes(search, { mode: 'insensitive' }),
+                f.string('name').includes(search, { mode: 'insensitive' }),
+              ]),
+            ]
+          : []),
+      ]);
+    const apps = this.options.database
+      .connection()
+      .repository<Row & { id: string; environmentId: string }>('relApps');
+    const sort = (s: SortBuilder) => [
+      s.field('createdAt').desc(),
+      s.field('id').desc(),
+    ];
+    const pageOf = (total: number) =>
+      Math.min(requestedPage, Math.max(1, Math.ceil(total / pageSize)));
+    if (
+      !Object.keys(options.labels ?? {}).length &&
+      !options.runStates?.length
+    ) {
+      const total = await apps.count({ filter: condition });
+      const page = pageOf(total);
+      const rows = await apps.findMany({
+        filter: condition,
+        sort,
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+      });
+      return {
+        items: await this.summarize(rows.map(decodeApp)),
+        total,
+        page,
+        pageSize,
+      };
     }
-    // Labels are opaque JSON, matched here rather than in SQL.
-    const rows = (await query.execute<Row>())
-      .map(decodeApp)
-      .filter((app) => matchesLabels(app.labels, options.labels));
-    const total = rows.length;
-    const page = Math.min(
-      requestedPage,
-      Math.max(1, Math.ceil(total / pageSize)),
-    );
-    const slice = rows.slice((page - 1) * pageSize, page * pageSize);
-    return { items: await this.summarize(slice), total, page, pageSize };
+
+    let total = 0;
+    let ids: string[] = [];
+    let statuses: RuntimeStatuses | undefined;
+    if (options.runStates?.length) {
+      // The driver takes all ids once per environment. Only ids/environment survive the label scan; statuses and
+      // candidates remain O(N), while labels and complete App records are bounded by a batch and a page respectively.
+      const candidates = [];
+      for await (const candidate of this.scanAppCandidates(
+        condition,
+        options.labels,
+      ))
+        candidates.push(candidate);
+      const known = await this.runtimeStatuses(candidates);
+      statuses = known;
+      const wanted = new Set(options.runStates);
+      const matching = candidates.filter((app) =>
+        wanted.has(
+          runStateOf(runtimeStatus(known.get(app.environmentId), app.id)),
+        ),
+      );
+      total = matching.length;
+      const page = pageOf(total);
+      ids = matching
+        .slice((page - 1) * pageSize, page * pageSize)
+        .map((app) => app.id);
+    } else {
+      // Retain the requested page and a rolling last page, including a full last page on an exact multiple.
+      let last: string[] = [];
+      for await (const app of this.scanAppCandidates(
+        condition,
+        options.labels,
+      )) {
+        if (total % pageSize === 0) last = [];
+        last.push(app.id);
+        if (
+          total >= (requestedPage - 1) * pageSize &&
+          total < requestedPage * pageSize
+        )
+          ids.push(app.id);
+        total += 1;
+      }
+      if (pageOf(total) !== requestedPage) ids = last;
+    }
+    const rows = ids.length
+      ? await apps.findMany({
+          filter: (f) => f.and([condition(f), among(f, 'id', ids)]),
+        })
+      : [];
+    const byId = new Map(rows.map((row) => [String(row.id), decodeApp(row)]));
+    const pageApps = ids.flatMap((id) => {
+      const app = byId.get(id);
+      return app ? [app] : [];
+    });
+    return {
+      items: await this.summarize(pageApps, statuses),
+      total,
+      page: pageOf(total),
+      pageSize,
+    };
+  }
+
+  private async *scanAppCandidates(
+    condition: (f: FilterBuilder) => FilterNode,
+    labels: Labels | undefined,
+  ): AsyncGenerator<Pick<AppRecord, 'id' | 'environmentId'>> {
+    const apps = this.options.database
+      .connection()
+      .repository<Row & { id: string; environmentId: string }>('relApps');
+    let cursor: { id: string; createdAt: string } | undefined;
+    for (;;) {
+      const after = cursor;
+      const rows = await apps.findMany({
+        // The redundant leading-axis bound lets SQLite seek the composite index instead of scanning the
+        // environment from its start for every OR cursor boundary. The cursor still resolves timestamp ties.
+        filter: after
+          ? (f) =>
+              f.and([
+                condition(f),
+                f.date('createdAt').notAfter(after.createdAt),
+              ])
+          : condition,
+        // Repository compiles the descending (createdAt, id) lexicographic boundary with exact equality on time.
+        cursor,
+        select: (s) => s.fields('id', 'environmentId', 'createdAt', 'labels'),
+        sort: (s) => [s.field('createdAt').desc(), s.field('id').desc()],
+        limit: 500,
+      });
+      for (const row of rows) {
+        if (matchesLabels(decodeLabels(row.labels), labels))
+          yield {
+            id: String(row.id),
+            environmentId: String(row.environmentId),
+          };
+      }
+      if (rows.length < 500) return;
+      const last = rows[rows.length - 1];
+      cursor = {
+        id: String(last.id),
+        createdAt: decodeDate(last.createdAt).toISOString(),
+      };
+    }
   }
 
   public async getApp(caller: Caller, appId: string): Promise<AppSummary> {
@@ -413,10 +571,22 @@ export class ReleasesService {
         (await this.options.guard.canApp(caller, action, app))
       )
         allowed.push(action);
-    const variables = await this.appVariablesOf(app).catch(() => null);
+    const [variables, shared] = await Promise.all([
+      this.appVariablesOf(app).catch(() => null),
+      this.hostOf(caller, app).catch(() => null),
+    ]);
+    const summary = (await this.summarize([app]))[0];
+    // A driver reporting an environment's restore error on its Apps would reveal the others it names: it is the
+    // environment's diagnosis, for those who may read it (`hostOf`).
+    const runtime =
+      summary.runtime?.error && shared?.hiddenErrors.has(summary.runtime.error)
+        ? { ...summary.runtime, error: UNRESTORED_APP_ERROR }
+        : summary.runtime;
     return {
-      ...(await this.summarize([app]))[0],
+      ...summary,
+      runtime,
       allowed,
+      host: shared?.view ?? null,
       ...(variables
         ? {
             variables: {
@@ -425,6 +595,131 @@ export class ReleasesService {
             },
           }
         : {}),
+    };
+  }
+
+  /**
+   * The runtime the App shares: one status call to the driver. Its counts and memory are totals of the whole runtime;
+   * no other App is named, and an environment's restore error only reaches those who manage environments.
+   */
+  private async hostOf(
+    caller: Caller,
+    app: AppRecord,
+  ): Promise<{
+    readonly view: AppHostView;
+    /** The restore errors withheld from the caller, so no other field passes them on. */
+    readonly hiddenErrors: ReadonlySet<string>;
+  } | null> {
+    const session = await this.session(app.environmentId);
+    const occupancy: HostOccupancy | null =
+      (await session.occupancy?.()) ?? null;
+    if (!occupancy) return null;
+    return await this.hostView(caller, occupancy);
+  }
+
+  /**
+   * The runtimes the environments with Apps share, each once however many environments run on it, for the
+   * environments page: one driver status call per such environment, then what `hostOf` reads per runtime. Requires the
+   * `rel.environments` `read` setting; restore errors are withheld as on an App's page.
+   */
+  public async listHosts(caller: Caller): Promise<SharedHostView[]> {
+    this.options.guard.requireSetting(caller, 'rel.environments', 'read');
+    // The sessions restore opened already: an environment without Apps runs nothing on any runtime.
+    const rows = await this.query()
+      .selectFrom('relApps')
+      .select('environmentId')
+      .distinct()
+      .execute<Row>();
+    const found = await Promise.all(
+      rows.map(async (row) => {
+        const environmentId = String(row.environmentId);
+        const occupancy = await this.session(environmentId)
+          .then((session) => session.occupancy?.() ?? null)
+          .catch(() => null);
+        return occupancy ? { environmentId, occupancy } : null;
+      }),
+    );
+    const hosts = new Map<
+      string,
+      { occupancy: HostOccupancy; environmentIds: string[] }
+    >();
+    for (const item of found) {
+      if (!item) continue;
+      const host = hosts.get(item.occupancy.id);
+      if (host) host.environmentIds.push(item.environmentId);
+      else
+        hosts.set(item.occupancy.id, {
+          occupancy: item.occupancy,
+          environmentIds: [item.environmentId],
+        });
+    }
+    const views: SharedHostView[] = [];
+    for (const { occupancy, environmentIds } of hosts.values()) {
+      const { view } = await this.hostView(caller, occupancy);
+      const environments = [];
+      for (const id of environmentIds.sort())
+        environments.push({
+          id,
+          name: (await this.options.environments.find(id))?.name ?? id,
+          // Counted as the host's `running`, so the environment's Apps filtered to running or starting are as many.
+          running: occupancy.apps.filter(
+            (item) =>
+              item.environmentId === id &&
+              (item.state === 'running' || item.state === 'starting'),
+          ).length,
+        });
+      views.push({ ...view, environments });
+    }
+    return views.sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  /** What `occupancy` says of the runtime, limited to what the caller may read. */
+  private async hostView(
+    caller: Caller,
+    occupancy: HostOccupancy,
+  ): Promise<{
+    readonly view: AppHostView;
+    readonly hiddenErrors: ReadonlySet<string>;
+  }> {
+    const environmentNames = new Map<string, string | null>();
+    for (const item of occupancy.failedEnvironments)
+      environmentNames.set(
+        item.environmentId,
+        (await this.options.environments.find(item.environmentId))?.name ??
+          null,
+      );
+    // An environment's restore error may name any of its Apps or their paths: only those who manage environments
+    // read it; everyone else learns that the restore failed.
+    const diagnoses = this.options.guard.hasSetting(
+      caller,
+      'rel.environments',
+      'manage',
+    );
+    const hiddenErrors = new Set(
+      diagnoses
+        ? []
+        : occupancy.failedEnvironments.flatMap((item) =>
+            item.error ? [item.error] : [],
+          ),
+    );
+    return {
+      view: {
+        id: occupancy.id,
+        memory: occupancy.memory,
+        recycling: occupancy.recycling,
+        deployed: occupancy.apps.length,
+        // Running or starting Apps hold the runtime; a failed one holds nothing and is not counted.
+        running: occupancy.apps.filter(
+          (item) => item.state === 'running' || item.state === 'starting',
+        ).length,
+        maxActive: occupancy.maxActive,
+        failedEnvironments: occupancy.failedEnvironments.map((item) => ({
+          id: item.environmentId,
+          name: environmentNames.get(item.environmentId) ?? null,
+          error: diagnoses ? item.error : null,
+        })),
+      },
+      hiddenErrors,
     };
   }
 
@@ -1810,8 +2105,8 @@ export class ReleasesService {
   }
 
   /**
-   * The deploy rules: `deploy` on the App, and nobody deploys directly to a protected environment, which takes a
-   * deployment request instead (`DeploymentRequestService.create`).
+   * The deploy rules: `deploy` on the App, plus environment approval eligibility for direct deployment to a protected environment.
+   * Other deployers use a deployment request (`DeploymentRequestService.create`).
    */
   public async authorizeDeploy(
     caller: Caller,
@@ -1820,7 +2115,10 @@ export class ReleasesService {
   ): Promise<void> {
     if (caller.kind === 'system') return;
     await this.options.guard.requireApp(caller, 'deploy', app);
-    if (environment.protected)
+    if (
+      environment.protected &&
+      !(await this.options.guard.isApprover(caller, app, environment))
+    )
       throw new ReleasesError(
         'This environment is protected: request the deployment, and an approver deploys it.',
         'APPROVAL_REQUIRED',
@@ -2658,7 +2956,39 @@ export class ReleasesService {
     });
   }
 
-  private async summarize(apps: readonly AppRecord[]): Promise<AppSummary[]> {
+  /** Each environment's driver status of these Apps, one call per environment; the error when its driver failed. */
+  private async runtimeStatuses(
+    apps: readonly Pick<AppRecord, 'id' | 'environmentId'>[],
+  ): Promise<RuntimeStatuses> {
+    const statuses = new Map<
+      string,
+      ReadonlyMap<string, AppObservedStatus> | Error
+    >();
+    for (const environmentId of new Set(apps.map((app) => app.environmentId)))
+      try {
+        const session = await this.session(environmentId);
+        statuses.set(
+          environmentId,
+          await session.status(
+            apps
+              .filter((app) => app.environmentId === environmentId)
+              .map((app) => app.id),
+          ),
+        );
+      } catch (error) {
+        statuses.set(
+          environmentId,
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    return statuses;
+  }
+
+  private async summarize(
+    apps: readonly AppRecord[],
+    /** Statuses already read for these Apps (a superset is fine), so they are not asked again. */
+    known?: RuntimeStatuses,
+  ): Promise<AppSummary[]> {
     if (!apps.length) return [];
     if (this.restoring)
       await Promise.race([this.restoring, delay(DEFAULT_STARTUP_WAIT_MS)]);
@@ -2704,33 +3034,19 @@ export class ReleasesService {
       currentReleases.map((row) => [String(row.appId), String(row.version)]),
     );
     const environments = new Map<string, EnvironmentRecord | null>();
-    const statuses = new Map<
-      string,
-      ReadonlyMap<string, AppObservedStatus> | Error
-    >();
+    const statuses = known ?? (await this.runtimeStatuses(apps));
     const sessions = new Map<string, DriverSession | null>();
     for (const environmentId of new Set(apps.map((app) => app.environmentId))) {
       environments.set(
         environmentId,
         await this.options.environments.find(environmentId),
       );
-      const environmentApps = apps.filter(
-        (app) => app.environmentId === environmentId,
+      sessions.set(
+        environmentId,
+        statuses.get(environmentId) instanceof Error
+          ? null
+          : await this.session(environmentId).catch(() => null),
       );
-      try {
-        const session = await this.session(environmentId);
-        sessions.set(environmentId, session);
-        statuses.set(
-          environmentId,
-          await session.status(environmentApps.map((app) => app.id)),
-        );
-      } catch (error) {
-        sessions.set(environmentId, null);
-        statuses.set(
-          environmentId,
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
     }
     return apps.map((app) => {
       const environment = environments.get(app.environmentId) ?? null;
@@ -2765,27 +3081,6 @@ export class ReleasesService {
     });
   }
 
-  private async findAppIdsBySearch(search: string): Promise<readonly string[]> {
-    const connection = this.options.database.connection();
-    const physical = await connection.collections.getPhysical('relApps');
-    if (!physical) throw new Error('The releases schema is unavailable.');
-    const knex = await connection.client<Knex>();
-    // A raw query bypasses the repository that scopes a table to its schema, so name the schema here. The columns are
-    // literals bound as identifiers; the only untrusted value is the bound search term.
-    const rows = await knex(physical.tableName)
-      .withSchema(physical.schema)
-      .select('id')
-      .whereRaw('lower(??) like lower(?) or lower(??) like lower(?)', [
-        'id',
-        `%${search}%`,
-        'name',
-        `%${search}%`,
-      ]);
-    return (rows as Array<Record<string, unknown>>).map((row) =>
-      String(row['id']),
-    );
-  }
-
   /** Opens (once) the driver session of an environment. */
   private session(environmentId: string): Promise<DriverSession> {
     if (this.closed)
@@ -2797,6 +3092,12 @@ export class ReleasesService {
         .then(({ driver, target }) =>
           driver.open(target, {
             desired: () => this.desiredSet(environmentId),
+            deploymentBatchBusy: (excluding) =>
+              [...this.dispatch].some(
+                ([id, item]) =>
+                  !excluding.has(id) &&
+                  (!item.environmentId || item.environmentId === environmentId),
+              ),
           }),
         );
       session.catch(() => {
@@ -3077,14 +3378,35 @@ export class ReleasesService {
   ): Promise<void> {
     const app = await this.requireApp(deployment.appId);
     const session = await this.session(app.environmentId);
-    // Drivers without a native queue keep the previous per-App serialization.
-    if (!session.progress)
-      return this.withLock(app.id, () =>
-        this.runDeployment(deployment.id, deployment.appId),
+    try {
+      // Drivers without a native queue keep the previous per-App serialization.
+      if (!session.progress)
+        return await this.withLock(app.id, () =>
+          this.runDeployment(
+            deployment.id,
+            deployment.appId,
+            app.environmentId,
+          ),
+        );
+      const lifecycle = this.locks.get(app.id);
+      if (lifecycle) await lifecycle.catch(() => undefined);
+      return await this.runDeployment(
+        deployment.id,
+        deployment.appId,
+        app.environmentId,
       );
-    const lifecycle = this.locks.get(app.id);
-    if (lifecycle) await lifecycle.catch(() => undefined);
-    return this.runDeployment(deployment.id, deployment.appId);
+    } finally {
+      // Metadata/initial-admission failures must not leave the batch busy forever either.
+      this.dispatch.delete(deployment.id);
+      try {
+        session.deploymentSettled?.();
+      } catch (error) {
+        this.diagnostic.error(
+          'Failed to notify the deployment driver after settlement',
+          error,
+        );
+      }
+    }
   }
 
   /** Lifecycle operations keep the deployment result current before reading its configuration. New dispatches wait on their App lock. */
@@ -3099,8 +3421,14 @@ export class ReleasesService {
   private async runDeployment(
     deploymentId: string,
     appId: string,
+    environmentId: string,
   ): Promise<void> {
-    const dispatch = { appId, submitted: false, cancelled: false };
+    const dispatch: {
+      appId: string;
+      submitted: boolean;
+      cancelled: boolean;
+      environmentId?: string;
+    } = { appId, submitted: false, cancelled: false, environmentId };
     this.dispatch.set(deploymentId, dispatch);
     const deployment = await this.requireDeploymentById(deploymentId);
     if (deployment.status !== 'queued') {
@@ -3163,6 +3491,8 @@ export class ReleasesService {
             });
         if (typeof entry.phase === 'string') {
           const phase = entry.phase as DeploymentPhase;
+          // A completed capacity rejection may re-enter a cancellable wait before one retry.
+          if (entry.cancellable === true) switchStarted = false;
           const first =
             !started &&
             phase !== 'queued' &&
@@ -4115,7 +4445,14 @@ function normalizeBuild(value: unknown): string | null {
   return value;
 }
 
-function runtimeStatus(
+/** Each environment's driver status of some of its Apps, or the error its driver answered. */
+type RuntimeStatuses = ReadonlyMap<
+  string,
+  ReadonlyMap<string, AppObservedStatus> | Error
+>;
+
+/** What the driver observed of an App, as an App summary reports its runtime. */
+export function runtimeStatus(
   status: ReadonlyMap<string, AppObservedStatus> | Error | undefined,
   appId: string,
 ): RuntimeStatus {
@@ -4145,6 +4482,9 @@ function runtimeStatus(
     startedAt: item.startedAt,
     error: item.error,
     lastAccessedAt: item.lastAccessedAt ?? null,
+    ...(item.holds?.length ? { holds: item.holds } : {}),
+    ...(item.waiting ? { waiting: item.waiting } : {}),
+    ...(item.unrestored ? { unrestored: true } : {}),
   };
 }
 

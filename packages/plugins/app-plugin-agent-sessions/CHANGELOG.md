@@ -1,5 +1,72 @@
 # @nocobase/app-plugin-agent-sessions
 
+## 1.0.0-beta.22
+
+### Patch Changes
+
+- 761fb01: Collect bounded, sanitized runner diagnostics through heartbeat requests, retain UTC-dated runner journals with configurable cleanup, merge downloaded archives into local timelines, and propagate request IDs to application error toasts.
+
+  Apply one credential-key rule in structured and text logs, hiding numeric credentials while preserving token-count field names.
+
+  Stream runner diagnostics one temporary file at a time with abort cleanup, per-runner export queues, progress and file-consumption callbacks. Intersect up to 500 selected runs with the requested dates, remove selected-run priority and file-count preferences, and provide `logs export` plus local `logs timeline` commands.
+
+- Updated dependencies [761fb01]
+  - @nocobase/agent-protocol@0.1.0-beta.20
+  - @nocobase/app-client@4.0.0-beta.11
+  - @nocobase/app-plugin-authentication@2.0.0-beta.23
+  - @nocobase/app-plugin-file@1.0.0-beta.32
+
+## 1.0.0-beta.21
+
+### Patch Changes
+
+- 1952789: Update authentication, editor, and validation dependencies to patched releases.
+- Updated dependencies [44bf26a]
+- Updated dependencies [1952789]
+  - @nocobase/app-server@5.0.0-beta.5
+  - @nocobase/acp-bridge@1.0.0-beta.7
+  - @nocobase/agent-protocol@0.1.0-beta.19
+  - @nocobase/app-plugin-authentication@2.0.0-beta.21
+  - @nocobase/app-plugin-file@1.0.0-beta.31
+
+## 1.0.0-beta.20
+
+### Minor Changes
+
+- a2a6385: Add Russian (ru-RU) and Korean (ko-KR) to the plugins Studio uses, and correct terminology in their existing translations: an issue is a task (it was translated as a magazine issue or a problem in several languages), a runtime is an execution environment, Agent and My Agent stay consistent, and an issue's executor and the backlog status read correctly. The remaining English strings in the agents plugin's translations are translated. Calendars follow Russian and Korean, and a browser asking for Traditional Chinese (zh-HK, zh-Hant-TW) now lands on zh-TW instead of zh-CN.
+
+### Patch Changes
+
+- Updated dependencies [7508a76]
+- Updated dependencies [fb4659d]
+- Updated dependencies [c635b6c]
+- Updated dependencies [1cda4c3]
+- Updated dependencies [7d970d6]
+- Updated dependencies [bb1dff2]
+- Updated dependencies [a2a6385]
+  - @nocobase/app-plugin-authentication@2.0.0-beta.20
+  - @nocobase/app-server@5.0.0-beta.2
+  - @nocobase/agent-protocol@0.1.0-beta.17
+  - @nocobase/db@1.0.0-beta.26
+  - @nocobase/app-plugin-file@1.0.0-beta.30
+  - @nocobase/i18n@2.0.0-beta.2
+  - @nocobase/app-client@4.0.0-beta.9
+
+## 1.0.0-beta.19
+
+### Patch Changes
+
+- 4f0370e: Keep agent settings available when agents return long display text or invalid choice identifiers, and show concrete discovery failures with field details.
+- Updated dependencies [4f0370e]
+- Updated dependencies [7c25f88]
+- Updated dependencies [7c25f88]
+- Updated dependencies [7c25f88]
+- Updated dependencies [215795d]
+  - @nocobase/acp-bridge@1.0.0-beta.6
+  - @nocobase/app-client@4.0.0-beta.9
+  - @nocobase/app-plugin-authentication@2.0.0-beta.19
+  - @nocobase/app-plugin-file@1.0.0-beta.29
+
 ## 1.0.0-beta.18
 
 ### Patch Changes

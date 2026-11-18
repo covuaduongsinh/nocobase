@@ -157,6 +157,9 @@ export type {
   TaskLockReleaseResult,
   TaskLockState,
   MigrationRunResult,
+  MigrationWarning,
+  MissingMigrationSource,
+  MissingSourcePolicy,
   MigrationSource,
   MigrationTransactionMode,
 } from './migration/types.js';
@@ -487,3 +490,5 @@ export {
 export type { DatabaseTaskConfig } from './task-config.js';
 
 export { getRepositoryMutationIdentity } from './repository/mutation-identity.js';
+
+export { withDatabaseTaskLock } from './migration/task-lock.js';

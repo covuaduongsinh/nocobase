@@ -5,8 +5,12 @@ const idID: FoundationResource = {
     settings: 'Pengaturan sistem',
     foundation: 'Fondasi aplikasi',
     foundationDescription: 'Kemampuan NocoBase yang digunakan aplikasi ini.',
+    capabilityGuide: 'Fitur dan ekstensi',
+    capabilityGuideDescription:
+      'Pelajari cara menggunakan fitur yang tersedia di aplikasi ini untuk membangun proses bisnis Anda.',
   },
   page: {
+    otherCapabilities: 'Kemampuan lainnya',
     notCounted: 'Belum dihitung',
     updatingHistory: 'Memperbarui… Menampilkan hasil sebelumnya.',
     previousKernel:
@@ -124,6 +128,7 @@ const idID: FoundationResource = {
     legendUnused: 'Belum digunakan {{count}}',
   },
   detail: {
+    selectedCapability: 'Kemampuan terpilih',
     retainedAt: 'Terakhir dikonfirmasi {{time}}',
     readNotes: 'Detail pembacaan',
     collectionCount: '{{count}} tabel',
@@ -396,6 +401,7 @@ const idID: FoundationResource = {
     seeds: 'Seed dijalankan',
   },
   dynamic: {
+    extension: 'Ekstensi',
     pending: 'Menunggu identifikasi',
     pendingDescription:
       'Plugin telah terdaftar. Konfigurasi dan penggunaan aktual belum ditentukan.',

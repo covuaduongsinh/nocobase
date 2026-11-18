@@ -129,6 +129,101 @@ describe('deployment control', () => {
     return { admin, release };
   }
 
+  it('reopens cancellation after a completed attempt enters a capacity wait', async () => {
+    const admin = await harness.as('admin', 'admin');
+    await harness.services.releases.createApp(admin, {
+      id: 'capacity',
+      name: 'Capacity',
+      environmentId: 'preview',
+    });
+    const artifact = await createArtifact(harness.rootDir, '1.0.0');
+    const release = await harness.services.releases.uploadRelease(
+      admin,
+      'capacity',
+      {
+        stream: (async function* () {
+          yield artifact.bytes;
+        })(),
+      },
+    );
+    const deployment = await harness.services.releases.deploy(
+      admin,
+      'capacity',
+      { releaseId: release.id },
+    );
+    await control.ready(deployment.id);
+    const operation = control.operations.get(deployment.id)!;
+    operation.event?.({ phase: 'starting', sequence: 1 });
+    await vi.waitFor(async () =>
+      expect(
+        (
+          await harness.services.releases.listDeployments(admin, 'capacity')
+        ).items.find((item) => item.id === deployment.id)!.cancellable,
+      ).toBe(false),
+    );
+    operation.event?.({
+      phase: 'queued',
+      queueAhead: 0,
+      sequence: 2,
+      cancellable: true,
+    });
+    await vi.waitFor(async () =>
+      expect(
+        (
+          await harness.services.releases.listDeployments(admin, 'capacity')
+        ).items.find((item) => item.id === deployment.id)!.cancellable,
+      ).toBe(true),
+    );
+    // A started deployment back in the queue is how the App's one state tells the capacity wait (`appStateOf`).
+    expect(
+      (await harness.services.releases.getApp(admin, 'capacity'))
+        .pendingDeployment,
+    ).toEqual({ status: 'deploying', queueAhead: 0 });
+    expect(
+      (
+        await harness.services.releases.cancelDeployment(
+          admin,
+          'capacity',
+          deployment.id,
+        )
+      ).status,
+    ).toBe('cancelled');
+    const after = await harness.services.releases.getApp(admin, 'capacity');
+    expect(after.hasPendingDeployment).toBe(false);
+    expect(after.pendingDeployment).toBeNull();
+  });
+
+  it('leaves no pending deployment once a capacity wait ends in a failure', async () => {
+    const { admin, release } = await setup();
+    const releases = harness.services.releases;
+    control.state.failing.add('1.0.0');
+    const deployment = await releases.deploy(admin, 'shop', {
+      releaseId: release.id,
+    });
+    await control.ready(deployment.id);
+    control.start(deployment.id);
+    control.operations.get(deployment.id)!.event?.({
+      phase: 'queued',
+      queueAhead: 0,
+      cancellable: true,
+    });
+    await vi.waitFor(async () =>
+      expect((await releases.getApp(admin, 'shop')).pendingDeployment).toEqual({
+        status: 'deploying',
+        queueAhead: 0,
+      }),
+    );
+    control.operations.get(deployment.id)!.finish();
+    await vi.waitFor(async () =>
+      expect(
+        (await releases.getDeployment(admin, 'shop', deployment.id)).status,
+      ).toBe('failed'),
+    );
+    const after = await releases.getApp(admin, 'shop');
+    expect(after.hasPendingDeployment).toBe(false);
+    expect(after.pendingDeployment).toBeNull();
+  });
+
   it('keeps the running deployment and only the newest queued deployment, including upload-and-deploy', async () => {
     const { admin, release } = await setup();
     const releases = harness.services.releases;

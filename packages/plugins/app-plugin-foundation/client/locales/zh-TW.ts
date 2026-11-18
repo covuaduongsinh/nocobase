@@ -5,8 +5,12 @@ const zhTW: FoundationResource = {
     settings: '系統設定',
     foundation: '應用底座',
     foundationDescription: '這個應用用到了哪些 NocoBase 基礎能力。',
+    capabilityGuide: '功能與擴充',
+    capabilityGuideDescription:
+      '了解目前應用程式已有的功能，以及如何運用它們建立業務功能。',
   },
   page: {
+    otherCapabilities: '其他能力',
     notCounted: '未統計',
     updatingHistory: '正在更新，目前顯示上次結果。',
     previousKernel:
@@ -118,6 +122,7 @@ const zhTW: FoundationResource = {
     legendUnused: '尚未使用 {{count}}',
   },
   detail: {
+    selectedCapability: '目前選取的能力',
     retainedAt: '上次確認於 {{time}}',
     readNotes: '讀取詳情',
     collectionCount: '共 {{count}} 張資料表',
@@ -365,6 +370,7 @@ const zhTW: FoundationResource = {
     seeds: '已執行種子',
   },
   dynamic: {
+    extension: '擴充功能',
     pending: '待辨識',
     pendingDescription: '此外掛已接入應用，設定與實際使用情況尚待辨識。',
   },
