@@ -123,8 +123,18 @@ if (natives.length === 0) {
 }
 
 /** Runs a command and returns its result rather than throwing, so one failure can be reported in context. */
-const run = (command, args, options = {}) =>
-  spawnSync(command, args, { encoding: 'utf8', ...options });
+const run = (command, args, options = {}) => {
+  const isWindows = process.platform === 'win32';
+  const cmd =
+    isWindows && (command === 'npm' || command === 'npx' || command === 'pnpm')
+      ? command + '.cmd'
+      : command;
+  return spawnSync(cmd, args, {
+    encoding: 'utf8',
+    shell: isWindows,
+    ...options,
+  });
+};
 
 let failures = 0;
 
