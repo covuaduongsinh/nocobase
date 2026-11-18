@@ -56,4 +56,18 @@ Kiểm tra `https://nocobase.dsc.edu.vn` và `https://studio.dsc.edu.vn` để �
 
 ## 4. Kết quả Thực hiện (Execution Summary)
 
-*(Sẽ cập nhật sau khi triển khai)*
+1. **Đã thực hiện gỡ bỏ thành công `nb3-nocolms`:**
+   - Đã gọi Dokploy API dừng container (`compose.stop`) và xóa dịch vụ cùng volumes (`compose.delete` with `deleteVolumes: true`).
+   - Đã kiểm tra lại qua Dokploy API: compose ID `EUUMXWbjkhU69t2zI6TOr` trả về `404 Not Found` (đã được dọn dẹp triệt để).
+   - Tên miền thử nghiệm `nocolms.dsc.edu.vn` đã giải phóng (trả về 404).
+
+2. **Tài nguyên thu hồi ước tính:**
+   - **RAM:** Thu hồi khoảng **1.4 GB RAM** (Postgres 384MB + Node app 1GB).
+   - **CPU:** Thu hồi khoảng **1.5 CPU cores** giới hạn container.
+   - **Ổ đĩa:** Đã dọn dẹp các volume và container liên quan.
+
+3. **Kiểm tra an toàn hệ thống Production:**
+   - `https://nocobase.dsc.edu.vn/main/api/healthz` -> `{"ok":true,"app":{"name":"main","basePath":"/main"}}` (hoạt động 100% bình thường).
+   - `https://studio.dsc.edu.vn/main/api/healthz` -> `{"ok":true,"app":{"name":"main","basePath":"/main"}}` (hoạt động 100% bình thường).
+   - Không gây ảnh hưởng tới bất kỳ dữ liệu đào tạo hay ứng dụng nghiệp vụ nào khác.
+
